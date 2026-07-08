@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from object_detection.detector import ObjectDetector
 
-def run_image_detection(detector, source_path, output_dir, use_supabase=False, user_id=None):
+def run_image_detection(detector, source_path, output_dir, use_supabase=False, user_id=None, no_show=False):
     """
     Runs object detection on a static image, prints results, and saves/shows annotated image.
     Optionally uploads results and logs detections to Supabase.
@@ -62,12 +62,13 @@ def run_image_detection(detector, source_path, output_dir, use_supabase=False, u
             print(f"[Supabase] Error uploading to Supabase: {str(e)}", file=sys.stderr)
 
     # Try to show image
-    try:
-        cv2.imshow("Object Detection Result - Press any key to close", annotated_img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-    except cv2.error:
-        print("Note: Running in a headless environment. Skipping window visualization.")
+    if not no_show:
+        try:
+            cv2.imshow("Object Detection Result - Press any key to close", annotated_img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        except cv2.error:
+            print("Note: Running in a headless environment. Skipping window visualization.")
 
 def run_video_detection(detector, source_path, output_dir, use_supabase=False, user_id=None):
     """
@@ -296,8 +297,8 @@ def main():
     parser.add_argument(
         "--model", 
         type=str, 
-        default="yolov8n.pt", 
-        help="YOLOv8 pre-trained model (e.g. yolov8n.pt, yolov8s.pt). Default is yolov8n.pt."
+        default="yolov8m.pt", 
+        help="YOLOv8 pre-trained model (e.g. yolov8n.pt, yolov8s.pt, yolov8m.pt). Default is yolov8m.pt."
     )
     parser.add_argument(
         "--conf", 
@@ -375,7 +376,8 @@ def main():
                 path, 
                 args.output_dir, 
                 use_supabase=args.supabase, 
-                user_id=args.user_id
+                user_id=args.user_id,
+                no_show=args.no_show
             )
         elif suffix in vid_suffixes:
             run_video_detection(

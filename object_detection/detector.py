@@ -5,12 +5,12 @@ from ultralytics import YOLO
 from object_detection.utils import get_color_palette, draw_bounding_box
 
 class ObjectDetector:
-    def __init__(self, model_name="yolov8n.pt", conf_threshold=0.25):
+    def __init__(self, model_name="yolov8m.pt", conf_threshold=0.25):
         """
         Initializes the YOLOv8 model.
         
         Args:
-            model_name (str): Name/path of the model weights (e.g. 'yolov8n.pt', 'yolov8s.pt').
+            model_name (str): Name/path of the model weights (e.g. 'yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt').
             conf_threshold (float): Default confidence threshold for detection.
         """
         self.model_name = model_name
@@ -24,13 +24,15 @@ class ObjectDetector:
         self.names = self.model.names
         self.colors = get_color_palette(len(self.names))
 
-    def detect(self, source, conf=None):
+    def detect(self, source, conf=None, imgsz=640, iou=0.7):
         """
         Runs object detection on the input image source (file path, numpy array, PIL Image).
         
         Args:
             source: Input source for YOLO model.
             conf (float): Custom confidence threshold (overrides default if provided).
+            imgsz (int | tuple): Inference image size. Default is 640.
+            iou (float): IoU threshold for NMS. Default is 0.7.
             
         Returns:
             list[dict]: List of detection dictionaries, each containing:
@@ -40,7 +42,7 @@ class ObjectDetector:
                 - box (list[float]): Bounding box [xmin, ymin, xmax, ymax]
         """
         conf_val = conf if conf is not None else self.conf_threshold
-        results = self.model.predict(source, conf=conf_val, verbose=False)
+        results = self.model.predict(source, conf=conf_val, imgsz=imgsz, iou=iou, verbose=False)
         
         detections = []
         if not results:
