@@ -25,7 +25,7 @@ object_detection/runs/
 object_detection/models/custom_train/
 
 # Local custom datasets
-dataset/
+
 object_detection/dataset/
 
 # Local prediction output directories
