@@ -1,22 +1,8 @@
 # YOLOv8 Dataset Template Configuration
 # Customize this file for your training dataset.
 
-# 1. Directory Structure Requirements:
-# Create a root dataset directory (e.g. ./dataset) containing:
-# dataset/
-# ├── images/
-# │   ├── train/      # Training images (e.g., img_001.jpg, img_002.jpg)
-# │   └── val/        # Validation images
-# └── labels/
-#     ├── train/      # YOLO text labels for training images (e.g., img_001.txt, img_002.txt)
-#     └── val/        # Validation labels for validation images
-#
-# Note: Each label file (.txt) must have one line per object in the format:
-# <class_id> <x_center> <y_center> <width> <height>
-# normalized to coordinates between 0.0 and 1.0.
-
 # Path to the root dataset folder (can be relative to where train.py is executed, or absolute)
-path: ./dataset
+path: ./yolo_dataset
 
 # Subdirectories for train/val splits
 train: images/train
@@ -25,6 +11,4 @@ test:  # optional: test images split (e.g. images/test)
 
 # Class dictionary mapping class IDs to names
 names:
-  0: custom_object
-  # 1: class_name_2
-  # 2: class_name_3
+  0: object

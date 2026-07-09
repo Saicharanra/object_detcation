@@ -1,0 +1,14 @@
+# YOLOv8 Dataset Template Configuration
+# Customize this file for your training dataset.
+
+# Path to the root dataset folder (can be relative to where train.py is executed, or absolute)
+path: C:/Users/saini/OneDrive/Documents/GitHub/object_detcation/object_detection/yolo_dataset
+
+# Subdirectories for train/val splits
+train: images/train
+val: images/val
+test:  # optional: test images split (e.g. images/test)
+
+# Class dictionary mapping class IDs to names
+names:
+  0: object
