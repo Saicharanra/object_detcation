@@ -1,53 +1,47 @@
 import cv2
 import numpy as np
+from PIL import Image
 from ultralytics import YOLO
 from object_detection.utils import get_color_palette, draw_bounding_box
 
 class ObjectDetector:
-    def __init__(self, model_name="yolo11s.pt", conf_threshold=0.4):
+    def __init__(self, model_name="yolov8n.pt", conf_threshold=0.25):
         """
-        Initializes the YOLOv11 model.
-
+        Initializes the YOLOv8 model.
+        
         Args:
-            model_name (str): Model weights. Options:
-                yolo11n.pt  - Nano  (fastest, least accurate)
-                yolo11s.pt  - Small (good balance, recommended)
-                yolo11m.pt  - Medium (more accurate, slower)
-                yolo11l.pt  - Large
-                yolo11x.pt  - Extra-large (most accurate)
-            conf_threshold (float): Minimum confidence score to show a detection.
+            model_name (str): Name/path of the model weights.
+            conf_threshold (float): Default confidence threshold for detection.
         """
         self.model_name = model_name
         self.conf_threshold = conf_threshold
-
-        print(f"Loading YOLOv11 model: {model_name}...")
+        
+        # Load pre-trained model
+        print(f"Loading object detection model: {model_name}...")
         self.model = YOLO(model_name)
-
-        # Class names are built-in (80 COCO classes)
+        
+        # Get names dictionary and generate a unique color palette
         self.names = self.model.names
         self.colors = get_color_palette(len(self.names))
-        print(f"Model loaded. Detects {len(self.names)} object classes.")
 
-    def detect(self, source, conf=None, imgsz=640, iou=0.5):
+    def detect(self, source, conf=None):
         """
-        Runs detection on the input source.
-
+        Runs object detection on the input image source.
+        
         Args:
-            source: Image/frame (numpy array, file path, or PIL Image).
-            conf (float): Override confidence threshold for this call.
-            imgsz (int): Inference image size.
-            iou (float): IoU threshold for NMS.
-
+            source: Input source for YOLO model (path, numpy array, PIL Image).
+            conf (float): Custom confidence threshold.
+            
         Returns:
-            list[dict]: Detections with class_id, class_name, confidence, box.
+            list[dict]: List of detection dictionaries.
         """
         conf_val = conf if conf is not None else self.conf_threshold
-        results = self.model.predict(source, conf=conf_val, imgsz=imgsz, iou=iou, verbose=False)
-
+        results = self.model.predict(source, conf=conf_val, verbose=False)
+        
         detections = []
         if not results:
             return detections
-
+            
         result = results[0]
         boxes = result.boxes
         if boxes is not None:
@@ -56,7 +50,7 @@ class ObjectDetector:
                 score = float(box.conf[0])
                 cls_id = int(box.cls[0])
                 class_name = self.names.get(cls_id, "unknown")
-
+                
                 detections.append({
                     "class_id": cls_id,
                     "class_name": class_name,
@@ -67,14 +61,7 @@ class ObjectDetector:
 
     def annotate_frame(self, frame, detections):
         """
-        Draws bounding boxes and labels onto the frame.
-
-        Args:
-            frame (numpy.ndarray): Frame to annotate.
-            detections (list[dict]): Detections from detect().
-
-        Returns:
-            numpy.ndarray: Annotated frame.
+        Draws bounding boxes and labels for the list of detections onto the frame.
         """
         annotated_frame = frame.copy()
         for det in detections:
@@ -82,8 +69,8 @@ class ObjectDetector:
             class_name = det["class_name"]
             confidence = det["confidence"]
             box = det["box"]
-
+            
             color = self.colors[cls_id] if cls_id < len(self.colors) else (0, 255, 0)
             annotated_frame = draw_bounding_box(annotated_frame, class_name, confidence, box, color)
-
+            
         return annotated_frame

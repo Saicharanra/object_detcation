@@ -10,58 +10,74 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from object_detection.detector import ObjectDetector
 
-def run_image_detection(detector, source_path, output_dir, use_supabase=False, user_id=None, no_show=False):
+def crop_and_save_detections(img, detections, output_dir, crop_dir, base_name=""):
     """
-    Runs object detection on a static image, prints results, and saves/shows annotated image.
-    Optionally uploads results and logs detections to Supabase.
+    Crops detected regions from the image and saves them to the crop directory.
+    """
+    c_dir = crop_dir if crop_dir else os.path.join(output_dir, "crops")
+    os.makedirs(c_dir, exist_ok=True)
+
+    saved_paths = []
+    h, w = img.shape[:2]
+
+    for i, det in enumerate(detections, 1):
+        xmin, ymin, xmax, ymax = det['box']
+        xmin_c = max(0, int(xmin))
+        ymin_c = max(0, int(ymin))
+        xmax_c = min(w, int(xmax))
+        ymax_c = min(h, int(ymax))
+
+        if xmax_c > xmin_c and ymax_c > ymin_c:
+            crop_img = img[ymin_c:ymax_c, xmin_c:xmax_c]
+            class_name = det['class_name'].replace(" ", "_")
+            timestamp = int(time.time())
+            out_filename = f"{class_name}_crop_{i}_{timestamp}.jpg"
+            out_path = os.path.join(c_dir, out_filename)
+            cv2.imwrite(out_path, crop_img)
+            print(f"  -> Saved cropped {det['class_name']} to: {out_path}")
+            saved_paths.append(out_path)
+
+    return saved_paths
+
+
+def run_image_detection(detector, source_path, output_dir, no_show=False, target_class=None, crop=False, crop_dir=None):
+    """
+    Runs object detection on a static image.
     """
     print(f"\n[IMAGE MODE] Loading image: {source_path}")
     img = cv2.imread(str(source_path))
     if img is None:
         print(f"Error: Could not load image from {source_path}", file=sys.stderr)
         return
-        
+
     start_time = time.time()
     detections = detector.detect(img)
     processing_time = time.time() - start_time
-    
+
+    if target_class:
+        target_class_lower = target_class.lower().strip()
+        detections = [d for d in detections if d['class_name'].lower().strip() == target_class_lower]
+        print(f"Filtered detections for target class: '{target_class}'")
+
     print(f"Detection completed in {processing_time:.3f} seconds.")
     print(f"Found {len(detections)} object(s):")
-    
+
     for i, det in enumerate(detections, 1):
         box_str = ", ".join([f"{coord:.1f}" for coord in det['box']])
         print(f"  {i}. Label: {det['class_name']} | Confidence: {det['confidence']:.2f} | Box: [{box_str}]")
-        
-    # Annotate and save locally
+
+    if crop and len(detections) > 0:
+        print("\nSaving cropped objects...")
+        crop_and_save_detections(img, detections, output_dir, crop_dir, Path(source_path).stem)
+
     annotated_img = detector.annotate_frame(img, detections)
-    
+
     os.makedirs(output_dir, exist_ok=True)
     out_filename = f"annotated_{Path(source_path).name}"
     out_path = os.path.join(output_dir, out_filename)
     cv2.imwrite(out_path, annotated_img)
     print(f"Saved annotated image to: {out_path}")
-    
-    # Upload to Supabase if enabled
-    if use_supabase and user_id:
-        print("\n[Supabase] Uploading image and detections to Supabase...")
-        try:
-            from object_detection.supabase_helper import save_to_supabase
-            res = save_to_supabase(
-                user_id=user_id,
-                original_filename=Path(source_path).name,
-                local_orig_path=str(source_path),
-                local_annot_path=out_path,
-                detections=detections,
-                processing_time=processing_time
-            )
-            print(f"[Supabase] Upload successful!")
-            print(f"  Image ID: {res['image_id']}")
-            print(f"  Original URL: {res['image_url']}")
-            print(f"  Annotated URL: {res['annotated_image_url']}\n")
-        except Exception as e:
-            print(f"[Supabase] Error uploading to Supabase: {str(e)}", file=sys.stderr)
 
-    # Try to show image
     if not no_show:
         try:
             cv2.imshow("Object Detection Result - Press any key to close", annotated_img)
@@ -70,215 +86,136 @@ def run_image_detection(detector, source_path, output_dir, use_supabase=False, u
         except cv2.error:
             print("Note: Running in a headless environment. Skipping window visualization.")
 
-def run_video_detection(detector, source_path, output_dir, use_supabase=False, user_id=None):
+
+def run_video_detection(detector, source_path, output_dir, target_class=None, crop=False, crop_dir=None):
     """
-    Runs object detection on a video file, prints progress, and saves the annotated video.
-    If Supabase is enabled, uploads the final annotated video to Supabase Storage.
+    Runs object detection on a video file, saves the annotated video.
     """
     print(f"\n[VIDEO MODE] Processing video: {source_path}")
     cap = cv2.VideoCapture(str(source_path))
     if not cap.isOpened():
         print(f"Error: Could not open video from {source_path}", file=sys.stderr)
         return
-        
+
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
+
     print(f"Video Info: {width}x{height} @ {fps:.2f} FPS | Total Frames: {total_frames}")
-    
+
     os.makedirs(output_dir, exist_ok=True)
     out_filename = f"annotated_{Path(source_path).name}"
     out_path = os.path.join(output_dir, out_filename)
-    
-    # Setup video writer
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-    
+
     frame_count = 0
     start_time = time.time()
-    
+
     try:
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-                
+
             frame_count += 1
-            # Run detection
             detections = detector.detect(frame)
-            
-            # Annotate
+
+            if target_class:
+                target_class_lower = target_class.lower().strip()
+                detections = [d for d in detections if d['class_name'].lower().strip() == target_class_lower]
+
+            if crop and len(detections) > 0:
+                video_name = Path(source_path).stem
+                v_crop_dir = crop_dir if crop_dir else os.path.join(output_dir, "crops", video_name)
+                os.makedirs(v_crop_dir, exist_ok=True)
+                h_img, w_img = frame.shape[:2]
+                for i, det in enumerate(detections, 1):
+                    xmin, ymin, xmax, ymax = det['box']
+                    xmin_c = max(0, int(xmin))
+                    ymin_c = max(0, int(ymin))
+                    xmax_c = min(w_img, int(xmax))
+                    ymax_c = min(h_img, int(ymax))
+                    if xmax_c > xmin_c and ymax_c > ymin_c:
+                        crop_img = frame[ymin_c:ymax_c, xmin_c:xmax_c]
+                        class_name = det['class_name'].replace(" ", "_")
+                        crop_filename = f"frame_{frame_count:04d}_{class_name}_{i}.jpg"
+                        cv2.imwrite(os.path.join(v_crop_dir, crop_filename), crop_img)
+
             annotated_frame = detector.annotate_frame(frame, detections)
             out.write(annotated_frame)
-            
+
             if frame_count % 10 == 0 or frame_count == total_frames:
                 pct = (frame_count / total_frames) * 100 if total_frames > 0 else 0
                 print(f"Processed frame {frame_count}/{total_frames} ({pct:.1f}%)")
-                
+
     finally:
         cap.release()
         out.release()
-        
+
     total_time = time.time() - start_time
     avg_fps = frame_count / total_time if total_time > 0 else 0
     print(f"\nFinished processing video. Saved to: {out_path}")
-    print(f"Total processing time: {total_time:.2f} seconds | Average processing speed: {avg_fps:.2f} FPS")
-    
-    # Upload to Supabase if enabled
-    if use_supabase and user_id:
-        print("\n[Supabase] Uploading video to Supabase Storage...")
-        try:
-            from object_detection.supabase_helper import save_to_supabase
-            # Create a single summary entry for the video
-            res = save_to_supabase(
-                user_id=user_id,
-                original_filename=Path(source_path).name,
-                local_orig_path=str(source_path),
-                local_annot_path=out_path,
-                detections=[],  # Empty detections for video files, or we can aggregate
-                processing_time=total_time
-            )
-            print(f"[Supabase] Video upload successful!")
-            print(f"  Video ID: {res['image_id']}")
-            print(f"  Original Video URL: {res['image_url']}")
-            print(f"  Annotated Video URL: {res['annotated_image_url']}\n")
-        except Exception as e:
-            print(f"[Supabase] Error uploading video: {str(e)}", file=sys.stderr)
+    print(f"Total time: {total_time:.2f}s | Avg speed: {avg_fps:.2f} FPS")
 
-def run_webcam_detection(detector, camera_index, no_show=False, use_supabase=False, user_id=None, save_interval=None):
+
+def run_webcam_detection(detector, camera_index, no_show=False, target_class=None, crop=False, crop_dir=None):
     """
-    Opens the default system webcam, runs real-time detection, logs to console, and displays window.
-    Optionally uploads snapshot images to Supabase on key press or at fixed intervals.
+    Opens system webcam and runs real-time YOLO-World detection.
     """
     print(f"\n[WEBCAM MODE] Initializing camera stream index {camera_index}...")
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
         print(f"Error: Could not open camera with index {camera_index}", file=sys.stderr)
         return
-        
+
     print("Camera stream opened successfully.")
     print("Press 'q' key in the visualization window (or Ctrl+C in terminal) to exit.")
-    if use_supabase:
-        print("Press 's' key in the visualization window to capture and upload a snapshot to Supabase.")
-        if save_interval:
-            print(f"Auto-saving snapshot to Supabase every {save_interval} seconds.")
-    
+
     frame_count = 0
-    feedback_frames = 0
-    last_save_time = time.time()
-    
+
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
                 print("Error: Failed to grab frame from camera.", file=sys.stderr)
                 break
-                
+
             frame_count += 1
             start_time = time.time()
             detections = detector.detect(frame)
-            latency = (time.time() - start_time) * 1000  # ms
-            
-            # Form clean summary log
+
+            if target_class:
+                target_class_lower = target_class.lower().strip()
+                detections = [d for d in detections if d['class_name'].lower().strip() == target_class_lower]
+
+            latency = (time.time() - start_time) * 1000
+
             objects = [f"{d['class_name']} ({d['confidence']:.2f})" for d in detections]
             obj_summary = ", ".join(objects) if objects else "None"
             print(f"[Frame {frame_count:04d}] Latency: {latency:.1f}ms | Detected: {obj_summary}")
-            
-            # Annotate frame
+
             annotated_frame = detector.annotate_frame(frame, detections)
-            
-            # Check for auto-save interval
-            should_save = False
-            current_time = time.time()
-            if use_supabase and save_interval and (current_time - last_save_time >= save_interval):
-                should_save = True
-                last_save_time = current_time
-                print(f"\n[Supabase] Auto-saving snapshot (interval: {save_interval}s)...")
-            
-            # Show interactive window features
+
+            if crop and len(detections) > 0:
+                crop_and_save_detections(frame, detections, "object_detection/output", crop_dir, "webcam")
+
             if not no_show:
-                # Add on-screen hints
-                if use_supabase:
-                    cv2.putText(
-                        annotated_frame, 
-                        "Supabase: Enabled | Press 's' to Save Snapshot", 
-                        (10, annotated_frame.shape[0] - 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        0.5, 
-                        (255, 0, 0), 
-                        1, 
-                        cv2.LINE_AA
-                    )
-                
-                # Snapshot upload visual feedback
-                if feedback_frames > 0:
-                    cv2.putText(
-                        annotated_frame, 
-                        "SNAPSHOT UPLOADED!", 
-                        (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        0.7, 
-                        (0, 255, 0), 
-                        2, 
-                        cv2.LINE_AA
-                    )
-                    feedback_frames -= 1
-                    
                 try:
-                    cv2.imshow("Real-Time Object Detection (Press 'q' to Quit)", annotated_frame)
+                    cv2.imshow("YOLOv11 Real-Time Detection (Press 'q' to Quit)", annotated_frame)
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
                         print("Exit signal received. Closing...")
                         break
-                    elif key == ord('s') and use_supabase:
-                        should_save = True
-                        print("\n[Supabase] Snapshot triggered manually via 's' key...")
                 except cv2.error:
-                    print("Visual display error: Heading to terminal-only logging (disabling window).")
+                    print("Visual display error: switching to terminal-only logging.")
                     no_show = True
-            
-            # Handle upload if triggered
-            if should_save:
-                # Save temp files locally to upload
-                temp_dir = Path("object_detection/output/temp")
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                
-                temp_orig = temp_dir / "snapshot_orig.jpg"
-                temp_annot = temp_dir / "snapshot_annot.jpg"
-                
-                cv2.imwrite(str(temp_orig), frame)
-                cv2.imwrite(str(temp_annot), annotated_frame)
-                
-                try:
-                    from object_detection.supabase_helper import save_to_supabase
-                    res = save_to_supabase(
-                        user_id=user_id,
-                        original_filename=f"webcam_snapshot_{int(time.time())}.jpg",
-                        local_orig_path=str(temp_orig),
-                        local_annot_path=str(temp_annot),
-                        detections=detections,
-                        processing_time=latency / 1000.0
-                    )
-                    print(f"[Supabase] Snapshot uploaded successfully!")
-                    print(f"  Image ID: {res['image_id']}")
-                    print(f"  Original URL: {res['image_url']}")
-                    print(f"  Annotated URL: {res['annotated_image_url']}\n")
-                    feedback_frames = 30  # display on-screen confirmation for next 30 frames
-                except Exception as upload_err:
-                    print(f"[Supabase] Error uploading snapshot: {str(upload_err)}", file=sys.stderr)
-                finally:
-                    # Clean up temp files
-                    if temp_orig.exists():
-                        temp_orig.unlink()
-                    if temp_annot.exists():
-                        temp_annot.unlink()
-            
+
             if no_show:
-                # Yield CPU
                 time.sleep(0.01)
-                
+
     except KeyboardInterrupt:
         print("\nKeyboard Interrupt received. Closing...")
     finally:
@@ -286,110 +223,133 @@ def run_webcam_detection(detector, camera_index, no_show=False, use_supabase=Fal
         cv2.destroyAllWindows()
         print("Camera stream closed.")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="YOLOv8 Real-Time Object Detection with Supabase Logging")
-    parser.add_argument(
-        "--source", 
-        type=str, 
-        required=True, 
-        help="Path to an image file, video file, or 'webcam' for real-time camera feed."
+    parser = argparse.ArgumentParser(
+        description="YOLOv11 Object Detection using OpenCV",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Detect objects from webcam
+  python run_detection.py --source webcam
+
+  # Detect objects in an image file
+  python run_detection.py --source photo.jpg
+
+  # Use a video file
+  python run_detection.py --source video.mp4
+
+  # Use a more accurate model
+  python run_detection.py --source webcam --model yolo11m.pt
+        """
     )
     parser.add_argument(
-        "--model", 
-        type=str, 
-        default="yolov8m.pt", 
-        help="YOLOv8 pre-trained model (e.g. yolov8n.pt, yolov8s.pt, yolov8m.pt). Default is yolov8m.pt."
+        "--source",
+        type=str,
+        required=True,
+        help="Path to an image file, video file, 'webcam', or a webcam index integer."
     )
     parser.add_argument(
-        "--conf", 
-        type=float, 
-        default=0.25, 
-        help="Confidence threshold for predictions. Default is 0.25."
+        "--model",
+        type=str,
+        default="yolo11s.pt",
+        help="YOLOv11 model weights. Options: yolo11n.pt (fastest), yolo11s.pt (balanced), yolo11m.pt (accurate), yolo11l.pt, yolo11x.pt (best). Default: yolo11s.pt"
     )
     parser.add_argument(
-        "--output-dir", 
-        type=str, 
-        default="object_detection/output", 
+        "--conf",
+        type=float,
+        default=0.4,
+        help="Confidence threshold (0.0-1.0). Default is 0.4."
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="object_detection/output",
         help="Directory to save annotated outputs. Default is object_detection/output."
     )
     parser.add_argument(
-        "--no-show", 
-        action="store_true", 
-        help="For webcam stream: disables displaying the cv2.imshow visualization window. Prints console log only."
+        "--no-show",
+        action="store_true",
+        help="Disable the cv2.imshow window. Prints console log only."
     )
     parser.add_argument(
-        "--supabase", 
-        action="store_true", 
-        help="Enables uploading detection images and database logs to Supabase."
+        "--target-class",
+        type=str,
+        default=None,
+        help="Filter detections to only show a specific class (e.g. 'person')."
     )
     parser.add_argument(
-        "--user-id", 
-        type=str, 
-        default="b35baf1f-33f4-4515-bfba-ea8d881f5187", 
-        help="Supabase User UUID to associate database entries with. Defaults to saicharan's user ID."
+        "--crop",
+        action="store_true",
+        help="Save cropped images of each detected object."
     )
     parser.add_argument(
-        "--save-interval", 
-        type=float, 
-        default=None, 
-        help="For webcam: automatic snapshot upload interval in seconds. Only active if --supabase is specified."
+        "--crop-dir",
+        type=str,
+        default=None,
+        help="Custom directory to save cropped objects (defaults to output-dir/crops)."
     )
-    
+
     args = parser.parse_args()
-    
+
     # Load detector
-    detector = ObjectDetector(model_name=args.model, conf_threshold=args.conf)
-    
-    # Run based on source
+    detector = ObjectDetector(
+        model_name=args.model,
+        conf_threshold=args.conf
+    )
+
     source = args.source
     if source.lower() == "webcam":
         run_webcam_detection(
-            detector, 
-            camera_index=0, 
-            no_show=args.no_show, 
-            use_supabase=args.supabase, 
-            user_id=args.user_id,
-            save_interval=args.save_interval
+            detector,
+            camera_index=0,
+            no_show=args.no_show,
+            target_class=args.target_class,
+            crop=args.crop,
+            crop_dir=args.crop_dir
         )
     elif source.isdigit():
         run_webcam_detection(
-            detector, 
-            camera_index=int(source), 
-            no_show=args.no_show, 
-            use_supabase=args.supabase, 
-            user_id=args.user_id,
-            save_interval=args.save_interval
+            detector,
+            camera_index=int(source),
+            no_show=args.no_show,
+            target_class=args.target_class,
+            crop=args.crop,
+            crop_dir=args.crop_dir
         )
     else:
         path = Path(source)
         if not path.exists():
             print(f"Error: Source path '{source}' does not exist.", file=sys.stderr)
             sys.exit(1)
-            
+
         suffix = path.suffix.lower()
         img_suffixes = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
         vid_suffixes = {'.mp4', '.avi', '.mov', '.mkv', '.wmv'}
-        
+
         if suffix in img_suffixes:
             run_image_detection(
-                detector, 
-                path, 
-                args.output_dir, 
-                use_supabase=args.supabase, 
-                user_id=args.user_id,
-                no_show=args.no_show
+                detector,
+                path,
+                args.output_dir,
+                no_show=args.no_show,
+                target_class=args.target_class,
+                crop=args.crop,
+                crop_dir=args.crop_dir
             )
         elif suffix in vid_suffixes:
             run_video_detection(
-                detector, 
-                path, 
-                args.output_dir, 
-                use_supabase=args.supabase, 
-                user_id=args.user_id
+                detector,
+                path,
+                args.output_dir,
+                target_class=args.target_class,
+                crop=args.crop,
+                crop_dir=args.crop_dir
             )
         else:
             print(f"Unsupported file format: {suffix}. Supported images: {img_suffixes}, videos: {vid_suffixes}", file=sys.stderr)
             sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

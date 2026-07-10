@@ -1,0 +1,30 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment files (sensitive credentials)
+.env
+.env.*
+!.env.template
+
+# Local uploads and datasets
+uploads/
+object_detection/output/
+object_detection/yolo_dataset/
+
+# Model weights (large files)
+*.pt
+
+# SQLite database (if used for local fallback)
+*.sqlite3
+
+# OS generated files
+.DS_Store
+Thumbs.db

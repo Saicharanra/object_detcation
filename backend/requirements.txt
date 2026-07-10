@@ -1,0 +1,13 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.6
+supabase>=1.0.3
+ultralytics>=8.0.200
+pyjwt>=2.7.0
+python-multipart>=0.0.6
+opencv-python-headless>=4.7.0.72
+pillow>=9.5.0
+python-dotenv>=1.0.0
+gunicorn>=20.1.0
+requests>=2.31.0

@@ -1,0 +1,79 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
+import logging
+
+from app.config import settings
+from app.database.session import engine, Base
+from app.api import auth, detection, analytics, training
+from app.ml.yolo_model import yolo_model
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Create tables in the database (primarily for SQLite fallback, Supabase is run via schema.sql)
+try:
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables verified/created successfully.")
+except Exception as e:
+    logger.error(f"Failed to initialize database tables: {str(e)}")
+
+# Modern Lifespan context manager for startup and shutdown actions
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Application starting up...")
+    try:
+        # Load YOLO-World model at startup
+        yolo_model.load_model()
+    except Exception as e:
+        logger.error(f"Could not load YOLO-World model on startup: {str(e)}", exc_info=True)
+    yield
+    logger.info("Application shutting down...")
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.PROJECT_VERSION,
+    lifespan=lifespan,
+    description="Production-ready FastAPI backend for YOLO-World open-vocabulary object detection."
+)
+
+# CORS configuration
+# Allows requests from Vite React default port 5173, plus common alternatives
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount local uploads directory as static files (useful for local development image access)
+app.mount("/uploads", StaticFiles(directory=str(settings.UPLOAD_DIR)), name="uploads")
+
+# Include routers
+app.include_router(auth.router)
+app.include_router(detection.router)
+app.include_router(analytics.router)
+app.include_router(training.router)
+
+@app.get("/")
+def read_root():
+    return {
+        "status": "healthy",
+        "project": settings.PROJECT_NAME,
+        "version": settings.PROJECT_VERSION,
+        "model": settings.YOLO_MODEL_NAME
+    }
