@@ -32,7 +32,6 @@ export default function Navbar() {
   const navLinks = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'History', path: '/history', icon: History },
-    { name: 'Profile', path: '/profile', icon: User },
   ]
 
   const isActive = (path) => location.pathname === path
@@ -96,15 +95,6 @@ export default function Navbar() {
                     {user?.email}
                   </span>
                 </div>
-
-                {/* Logout Button */}
-                <button
-                  onClick={handleLogout}
-                  className="hidden md:flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/20 transition-colors"
-                >
-                  <LogOut className="w-4.5 h-4.5" />
-                  <span>Logout</span>
-                </button>
               </>
             )}
 
@@ -143,16 +133,7 @@ export default function Navbar() {
                 </Link>
               )
             })}
-            <button
-              onClick={() => {
-                setIsOpen(false)
-                handleLogout()
-              }}
-              className="flex w-full items-center space-x-3 px-4 py-3 rounded-xl text-base font-medium text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/20"
-            >
-              <LogOut className="w-5 h-5" />
-              <span>Logout</span>
-            </button>
+            {/* Logout disabled */}
           </div>
         </div>
       )}

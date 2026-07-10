@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
   Chart as ChartJS, 
@@ -31,7 +31,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  HelpCircle
+  HelpCircle,
+  Camera,
+  VideoOff,
+  Sliders
 } from 'lucide-react'
 
 import api from '../services/api'
@@ -51,6 +54,292 @@ ChartJS.register(
   Legend,
   Filler
 )
+
+function LiveCameraStream({ useCustomModel }) {
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const wsRef = useRef(null)
+  const streamRef = useRef(null)
+  
+  const [streaming, setStreaming] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [confidence, setConfidence] = useState(0.4)
+  const [fps, setFps] = useState(0)
+  const [latency, setLatency] = useState(0)
+  const [detectedObjects, setDetectedObjects] = useState([])
+  const [error, setError] = useState(null)
+
+  // Use refs to avoid React closure capture in WebSocket callbacks
+  const streamingRef = useRef(false)
+  const promptRef = useRef(prompt)
+  const confidenceRef = useRef(confidence)
+  const useCustomModelRef = useRef(useCustomModel)
+
+  useEffect(() => {
+    promptRef.current = prompt
+  }, [prompt])
+
+  useEffect(() => {
+    confidenceRef.current = confidence
+  }, [confidence])
+
+  useEffect(() => {
+    useCustomModelRef.current = useCustomModel
+  }, [useCustomModel])
+  
+  const startStream = async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 }
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play().catch(e => console.error("Video element play error:", e))
+      }
+      
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${wsProto}//localhost:8000/ws/detect`
+      
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+      
+      ws.onopen = () => {
+        setStreaming(true)
+        streamingRef.current = true
+        setLoading(false)
+        // Delay sending first frame slightly to allow camera warmth-up
+        setTimeout(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            sendFrame(ws)
+          }
+        }, 300)
+      }
+      
+      ws.onmessage = (event) => {
+        try {
+          const response = JSON.parse(event.data)
+          if (response.error) {
+            setError(response.error)
+          } else {
+            const img = new Image()
+            img.src = response.image
+            img.onload = () => {
+              const canvas = canvasRef.current
+              if (canvas) {
+                const ctx = canvas.getContext('2d')
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+              }
+            }
+            
+            setDetectedObjects(response.objects || [])
+            setLatency(response.processing_time * 1000)
+            trackFPS()
+          }
+        } catch (err) {
+          console.error("WebSocket message error:", err)
+        }
+        
+        if (streamingRef.current && ws.readyState === WebSocket.OPEN) {
+          setTimeout(() => sendFrame(ws), 10)
+        }
+      }
+      
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err)
+        setError("WebSocket connection failed. Ensure backend server is running.")
+        stopStream()
+      }
+      
+      ws.onclose = () => {
+        setStreaming(false)
+        streamingRef.current = false
+        setLoading(false)
+      }
+      
+    } catch (err) {
+      console.error("Camera access error:", err)
+      setError("Failed to access camera. Please allow camera permissions in your browser.")
+      setLoading(false)
+    }
+  }
+  
+  const stopStream = () => {
+    setStreaming(false)
+    streamingRef.current = false
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+      streamRef.current = null
+    }
+    if (wsRef.current) {
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.close()
+      }
+      wsRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+    const canvas = canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+    setDetectedObjects([])
+    setFps(0)
+    setLatency(0)
+  }
+  
+  const sendFrame = (ws) => {
+    const video = videoRef.current
+    if (!video || !ws || ws.readyState !== WebSocket.OPEN || !streamRef.current || !streamingRef.current) return
+    
+    const tempCanvas = document.createElement('canvas')
+    tempCanvas.width = 640
+    tempCanvas.height = 480
+    const ctx = tempCanvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height)
+    
+    const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.6)
+    
+    const payload = {
+      image: dataUrl,
+      prompt: promptRef.current,
+      confidence: parseFloat(confidenceRef.current),
+      use_custom_model: useCustomModelRef.current
+    }
+    ws.send(JSON.stringify(payload))
+  }
+  
+  let lastFrameTime = useRef(performance.now())
+  const trackFPS = () => {
+    const now = performance.now()
+    const currentFps = Math.round(1000 / (now - lastFrameTime.current))
+    setFps(currentFps)
+    lastFrameTime.current = now
+  }
+  
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
+      }
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [])
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      {/* Stream Display */}
+      <div className="glass-card p-6 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="flex items-center justify-between w-full mb-4">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Live Video Output</h3>
+          
+          {/* Status pill during active stream */}
+          {streaming && (
+            <div className="flex items-center space-x-4 text-[11px]">
+              <div className="flex items-center space-x-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                <span>Live</span>
+              </div>
+              <span className="text-slate-500">Latency: <strong className="text-slate-700 dark:text-slate-350">{latency.toFixed(0)} ms</strong></span>
+              <span className="text-slate-500">FPS: <strong className="text-slate-700 dark:text-slate-300">{fps}</strong></span>
+            </div>
+          )}
+        </div>
+        
+        <div className="relative border-2 border-slate-200 dark:border-darkBorder rounded-2xl overflow-hidden bg-slate-950/90 aspect-[4/3] w-full max-w-[640px] flex items-center justify-center shadow-inner">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{ position: 'absolute', width: '1px', height: '1px', opacity: 0 }}
+          />
+          <canvas
+            ref={canvasRef}
+            width={640}
+            height={480}
+            className={`w-full max-w-[640px] aspect-[4/3] object-cover ${streaming ? 'block' : 'hidden'}`}
+          />
+          
+          {!streaming && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-4">
+              <div className="p-4 bg-slate-800/80 rounded-full text-slate-400">
+                <Camera className="w-10 h-10 animate-pulse" />
+              </div>
+              <span className="text-sm font-bold text-slate-300">Camera Feed Inactive</span>
+              <p className="text-xs text-slate-500 max-w-xs leading-normal">
+                Start the live camera stream to detect objects dynamically in real-time.
+              </p>
+              
+              <button
+                onClick={startStream}
+                disabled={loading}
+                className="btn-primary py-2.5 px-6 font-semibold shadow-md text-sm flex items-center justify-center space-x-2 rounded-xl transition-all hover:scale-102 mt-2"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="w-4.5 h-4.5 animate-spin" />
+                    <span>Connecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Camera className="w-4.5 h-4.5" />
+                    <span>Start Camera Stream</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="w-full mt-4 p-3 bg-red-50 dark:bg-red-950/15 rounded-xl border border-red-200/20 text-red-700 dark:text-red-400 text-xs leading-normal text-center">
+            {error}
+          </div>
+        )}
+
+        {streaming && (
+          <div className="w-full mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100 dark:border-darkBorder/30 pt-4 animate-fade-in">
+            {/* Active detections list */}
+            <div className="flex-1 space-y-1.5 w-full text-left">
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Detections</h4>
+              {detectedObjects.length === 0 ? (
+                <p className="text-xs text-slate-500 italic">No objects currently detected.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {detectedObjects.map((obj, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2.5 py-1 bg-brand-500/10 text-brand-600 dark:text-brand-400 rounded-lg text-[11px] font-bold border border-brand-500/20"
+                    >
+                      {obj.name} ({(obj.confidence * 100).toFixed(0)}%)
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Stop Stream Button */}
+            <button
+              onClick={stopStream}
+              className="bg-rose-500 hover:bg-rose-600 text-white font-semibold py-2 px-4 rounded-xl shadow-sm text-xs transition-colors flex items-center justify-center space-x-1.5 w-full sm:w-auto self-end"
+            >
+              <VideoOff className="w-3.5 h-3.5" />
+              <span>Stop Stream</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function Dashboard() {
   const queryClient = useQueryClient()
@@ -369,6 +658,16 @@ export default function Dashboard() {
             Detection Studio
           </button>
           <button
+            onClick={() => setActiveTab('live')}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${
+              activeTab === 'live'
+                ? 'bg-white dark:bg-darkCard text-brand-600 dark:text-brand-400 shadow-sm'
+                : 'text-slate-655 dark:text-slate-400 hover:text-slate-950'
+            }`}
+          >
+            Live Camera
+          </button>
+          <button
             onClick={() => setActiveTab('training')}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 ${
               activeTab === 'training'
@@ -442,6 +741,10 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+      )}
+
+      {activeTab === 'live' && (
+        <LiveCameraStream useCustomModel={useCustomModel} />
       )}
 
       {activeTab === 'analytics' && (
@@ -686,10 +989,11 @@ export default function Dashboard() {
                     className="input-field py-2 px-3 text-sm"
                   >
                     <option value={3}>3 Epochs (Fastest)</option>
-                    <option value={5}>5 Epochs (Recommended)</option>
+                    <option value={5}>5 Epochs (Standard)</option>
                     <option value={10}>10 Epochs (Better)</option>
-                    <option value={15}>15 Epochs (Thorough)</option>
-                    <option value={20}>20 Epochs (Max)</option>
+                    <option value={20}>20 Epochs (Recommended)</option>
+                    <option value={30}>30 Epochs (Thorough)</option>
+                    <option value={50}>50 Epochs (High Accuracy)</option>
                   </select>
                   <p className="text-[10px] text-slate-500 leading-normal">
                     Fewer epochs complete faster. Training runs locally on the server CPU.

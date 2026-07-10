@@ -5,169 +5,35 @@ import api from '../services/api'
 const AuthContext = createContext(null)
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState({
+    id: '00000000-0000-0000-0000-000000000000',
+    email: 'guest@example.com',
+    full_name: 'Guest User'
+  })
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (supabase) {
-      // 1. Initial session load
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || ''
-          })
-        } else {
-          setUser(null)
-        }
-        setLoading(false)
-      })
-
-      // 2. Auth state change listener
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || ''
-          })
-        } else {
-          setUser(null)
-        }
-        setLoading(false)
-      })
-
-      return () => {
-        subscription?.unsubscribe()
-      }
-    } else {
-      // Mock mode initialization
-      const mockUser = localStorage.getItem('mock_user')
-      if (mockUser) {
-        setUser(JSON.parse(mockUser))
-      }
-      setLoading(false)
-    }
+    setLoading(false)
   }, [])
 
   const signup = async (email, password, fullName) => {
-    setLoading(true)
-    try {
-      if (supabase) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: fullName }
-          }
-        })
-        if (error) throw error
-        
-        // Also call backend to register profile (if trigger is delayed or for db logging)
-        try {
-          await api.post('/auth/signup', { email, password, full_name: fullName })
-        } catch (backendError) {
-          console.warn("Backend profile sync note:", backendError)
-        }
-
-        if (data.session?.user) {
-          setUser({
-            id: data.session.user.id,
-            email: data.session.user.email,
-            full_name: fullName
-          })
-        }
-        return data
-      } else {
-        // Mock signup
-        const mockId = 'mock-uid-12345'
-        const mockProfile = { id: mockId, email, full_name: fullName }
-        localStorage.setItem('mock_user', JSON.stringify(mockProfile))
-        localStorage.setItem('mock_token', 'mock-jwt-token')
-        setUser(mockProfile)
-        
-        // Register in local SQLite via mock call
-        try {
-          await api.post('/auth/signup', { email, password, full_name: fullName })
-        } catch (err) {
-          console.error(err)
-        }
-        return { user: mockProfile }
-      }
-    } finally {
-      setLoading(false)
-    }
+    return { user }
   }
 
   const login = async (email, password) => {
-    setLoading(true)
-    try {
-      if (supabase) {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password
-        })
-        if (error) throw error
-        
-        // Sync login session details
-        if (data.user) {
-          setUser({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: data.user.user_metadata?.full_name || ''
-          })
-        }
-        return data
-      } else {
-        // Mock login
-        const mockProfile = { id: 'mock-uid-12345', email, full_name: 'Mock User' }
-        localStorage.setItem('mock_user', JSON.stringify(mockProfile))
-        localStorage.setItem('mock_token', 'mock-jwt-token')
-        setUser(mockProfile)
-        
-        // Send login to backend
-        try {
-          await api.post('/auth/login', { email, password })
-        } catch (err) {
-          console.error(err)
-        }
-        return { user: mockProfile }
-      }
-    } finally {
-      setLoading(false)
-    }
+    return { user }
   }
 
   const logout = async () => {
-    setLoading(true)
-    try {
-      if (supabase) {
-        const { error } = await supabase.auth.signOut()
-        if (error) throw error
-      } else {
-        localStorage.removeItem('mock_user')
-        localStorage.removeItem('mock_token')
-      }
-      setUser(null)
-    } finally {
-      setLoading(false)
-    }
+    // No-op for guest mode
   }
 
   const resetPassword = async (email) => {
-    if (supabase) {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`
-      })
-      if (error) throw error
-    } else {
-      console.log(`Mock reset password email sent to ${email}`)
-    }
+    // No-op for guest mode
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signup, login, logout, resetPassword, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, loading, signup, login, logout, resetPassword, isAuthenticated: true }}>
       {children}
     </AuthContext.Provider>
   )

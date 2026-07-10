@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 import logging
 
@@ -160,3 +160,83 @@ def delete_history_item(
             detail="Image not found or access denied"
         )
     return {"status": "success", "message": "Detection history item deleted successfully"}
+
+import base64
+import json
+import io
+import numpy as np
+import cv2
+from PIL import Image
+from app.ml.yolo_model import yolo_model
+
+@router.websocket("/ws/detect")
+async def ws_detect(websocket: WebSocket, db: Session = Depends(get_db)):
+    await websocket.accept()
+    logger.info("Live stream WebSocket connection accepted.")
+    try:
+        while True:
+            # Receive message as JSON text
+            # Format: { "image": "data:image/jpeg;base64,...", "prompt": "...", "confidence": 0.4 }
+            data = await websocket.receive_text()
+            
+            try:
+                payload = json.loads(data)
+                img_data_url = payload.get("image", "")
+                prompt_str = payload.get("prompt", None)
+                confidence_val = payload.get("confidence", None)
+                use_custom_model = payload.get("use_custom_model", False)
+                
+                if not img_data_url:
+                    continue
+                
+                # Extract base64 payload
+                if "," in img_data_url:
+                    _, base64_str = img_data_url.split(",", 1)
+                else:
+                    base64_str = img_data_url
+                
+                # Decode base64 image data
+                image_bytes = base64.b64decode(base64_str)
+                image = Image.open(io.BytesIO(image_bytes))
+                
+                # Convert PIL Image (RGB) to OpenCV format (BGR)
+                frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                
+                # Parse classes filter from comma-separated prompt string
+                custom_classes = None
+                if prompt_str:
+                    custom_classes = [c.strip() for c in prompt_str.split(",") if c.strip()]
+                
+                # Run real-time detection on the numpy array in memory
+                detections, processing_time, annotated_frame = yolo_model.predict_frame(
+                    frame=frame,
+                    custom_classes=custom_classes,
+                    confidence=confidence_val,
+                    user_id="00000000-0000-0000-0000-000000000000", # Mock Guest User
+                    use_custom_model=use_custom_model
+                )
+                
+                # Encode annotated image back to JPEG base64 string
+                _, encoded_img = cv2.imencode(".jpg", annotated_frame)
+                base64_annotated = base64.b64encode(encoded_img).decode("utf-8")
+                annotated_data_url = f"data:image/jpeg;base64,{base64_annotated}"
+                
+                # Send processed results back to client
+                response = {
+                    "image": annotated_data_url,
+                    "objects": detections,
+                    "processing_time": processing_time
+                }
+                await websocket.send_text(json.dumps(response))
+                
+            except Exception as e:
+                logger.error(f"Error processing WebSocket frame: {str(e)}")
+                # Send error message back to client
+                await websocket.send_text(json.dumps({
+                    "error": f"Frame processing failed: {str(e)}"
+                }))
+                
+    except WebSocketDisconnect:
+        logger.info("Live stream WebSocket disconnected.")
+    except Exception as e:
+        logger.error(f"WebSocket error: {str(e)}")

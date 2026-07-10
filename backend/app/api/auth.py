@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import jwt
 import logging
+import uuid
 
 from app.config import settings
 from app.database.session import get_db
@@ -37,58 +38,31 @@ class ProfileResponse(BaseModel):
     created_at: str
 
 # --- JWT Authentication Dependency ---
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    token = credentials.credentials
+def get_current_user(db: Session = Depends(get_db)) -> dict:
+    # Bypassed authentication: always return default guest user profile
+    guest_id = "00000000-0000-0000-0000-000000000000"
     
-    # 1. Attempt to decode token locally if JWT secret is configured
-    if settings.SUPABASE_JWT_SECRET:
+    # Ensure guest user exists in the database to prevent foreign key violations
+    exists = db.query(User).filter(User.id == guest_id).first()
+    if not exists:
+        logger.info("Creating default guest user in database...")
+        guest_user = User(
+            id=guest_id,
+            email="guest@example.com",
+            full_name="Guest User"
+        )
+        db.add(guest_user)
         try:
-            # Supabase tokens are signed with HS256 and typically have "authenticated" audience
-            payload = jwt.decode(
-                token, 
-                settings.SUPABASE_JWT_SECRET, 
-                algorithms=["HS256"], 
-                options={"verify_aud": False}
-            )
-            user_id = payload.get("sub")
-            email = payload.get("email")
-            if not user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED, 
-                    detail="Invalid token claims: sub missing"
-                )
-            return {"id": user_id, "email": email}
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Authentication token has expired"
-            )
-        except jwt.InvalidTokenError as e:
-            logger.debug(f"Local token validation failed, falling back to SDK: {str(e)}")
-
-    # 2. Fallback to Supabase API verification
-    if supabase_client is not None:
-        try:
-            # This calls the Supabase API to fetch user details using the token
-            res = supabase_client.auth.get_user(token)
-            if res and res.user:
-                return {"id": res.user.id, "email": res.user.email}
+            db.commit()
         except Exception as e:
-            logger.error(f"Supabase token validation exception: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid or expired session token: {str(e)}"
-            )
-
-    # 3. Local mock fallback (for testing/dev when Supabase variables are unset)
-    if not settings.SUPABASE_URL:
-        logger.warning("Supabase URL is not set. Authenticating with mock user credentials.")
-        return {"id": "00000000-0000-0000-0000-000000000000", "email": "mock@example.com"}
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Unable to validate authentication token"
-    )
+            db.rollback()
+            logger.error(f"Failed to seed default guest user: {str(e)}")
+            
+    return {
+        "id": guest_id,
+        "email": "guest@example.com",
+        "full_name": "Guest User"
+    }
 
 # --- Routes ---
 
@@ -103,7 +77,7 @@ def signup(req: SignUpRequest, db: Session = Depends(get_db)):
         if exists:
             raise HTTPException(status_code=400, detail="Email already registered")
             
-        mock_id = str(uuid.uuid4()) if "uuid" in globals() else "00000000-0000-0000-0000-000000000000"
+        mock_id = str(uuid.uuid4())
         db_user = User(id=mock_id, email=req.email, full_name=req.full_name)
         db.add(db_user)
         db.commit()

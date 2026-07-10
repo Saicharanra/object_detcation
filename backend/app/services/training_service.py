@@ -168,6 +168,10 @@ def _run_training_background(user_id: str, job_id: str, dataset_yaml_path: str, 
             exist_ok=True,
             device="cpu",
             workers=0, # Thread safety in Python
+            optimizer="AdamW",  # Better optimizer for fine-tuning custom classes
+            lr0=0.005,          # Stable starting learning rate
+            cos_lr=True,        # Cosine learning rate scheduler
+            close_mosaic=min(10, epochs), # Optimize bounding box accuracy at the end of training
             verbose=False
         )
         

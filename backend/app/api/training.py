@@ -14,7 +14,7 @@ router = APIRouter(prefix="/train", tags=["Model Training"])
 
 @router.post("")
 def start_model_training(
-    epochs: int = Form(5, ge=1, le=20, description="Number of training epochs (max 20)"),
+    epochs: int = Form(5, ge=1, le=50, description="Number of training epochs (max 50)"),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
