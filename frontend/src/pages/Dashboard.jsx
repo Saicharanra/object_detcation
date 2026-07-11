@@ -55,7 +55,7 @@ ChartJS.register(
   Filler
 )
 
-function LiveCameraStream({ useCustomModel }) {
+function LiveCameraStream({ useCustomModel, setUseCustomModel, customModelAvailable }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const wsRef = useRef(null)
@@ -240,17 +240,38 @@ function LiveCameraStream({ useCustomModel }) {
         <div className="flex items-center justify-between w-full mb-4">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">Live Video Output</h3>
           
-          {/* Status pill during active stream */}
-          {streaming && (
-            <div className="flex items-center space-x-4 text-[11px]">
-              <div className="flex items-center space-x-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full font-bold">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                <span>Live</span>
+          <div className="flex items-center space-x-6">
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                className="sr-only peer" 
+                checked={useCustomModel} 
+                onChange={(e) => {
+                  if (e.target.checked && !customModelAvailable) {
+                    alert("Please train your custom model in the 'Model Training' tab first before enabling this!");
+                  } else {
+                    setUseCustomModel(e.target.checked);
+                  }
+                }} 
+              />
+              <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-750 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-brand-600 cursor-pointer"></div>
+              <span className="ml-1.5 text-[10px] font-bold text-slate-500 dark:text-slate-450">
+                Use Custom Model {!customModelAvailable && '(Train Required)'}
+              </span>
+            </label>
+
+            {/* Status pill during active stream */}
+            {streaming && (
+              <div className="flex items-center space-x-4 text-[11px]">
+                <div className="flex items-center space-x-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span>Live</span>
+                </div>
+                <span className="text-slate-500">Latency: <strong className="text-slate-700 dark:text-slate-350">{latency.toFixed(0)} ms</strong></span>
+                <span className="text-slate-500">FPS: <strong className="text-slate-700 dark:text-slate-350">{fps}</strong></span>
               </div>
-              <span className="text-slate-500">Latency: <strong className="text-slate-700 dark:text-slate-350">{latency.toFixed(0)} ms</strong></span>
-              <span className="text-slate-500">FPS: <strong className="text-slate-700 dark:text-slate-300">{fps}</strong></span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
         
         <div className="relative border-2 border-slate-200 dark:border-darkBorder rounded-2xl overflow-hidden bg-slate-950/90 aspect-[4/3] w-full max-w-[640px] flex items-center justify-center shadow-inner">
@@ -306,7 +327,42 @@ function LiveCameraStream({ useCustomModel }) {
         )}
 
         {streaming && (
-          <div className="w-full mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100 dark:border-darkBorder/30 pt-4 animate-fade-in">
+          <div className="w-full mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-100 dark:border-darkBorder/30 pt-4 animate-fade-in text-left">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Custom Classes (Comma Separated)
+              </label>
+              <input
+                type="text"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="e.g. laptop, mobile phone, bottle"
+                className="input-field py-1.5 px-3 text-xs w-full bg-white dark:bg-darkCard"
+              />
+            </div>
+            
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Confidence Threshold
+                </label>
+                <span className="text-xs font-bold text-brand-500">{(confidence * 100).toFixed(0)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="0.9"
+                step="0.05"
+                value={confidence}
+                onChange={(e) => setConfidence(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-slate-200 dark:bg-slate-750 rounded-lg appearance-none cursor-pointer accent-brand-500 mt-2"
+              />
+            </div>
+          </div>
+        )}
+
+        {streaming && (
+          <div className="w-full mt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-100 dark:border-darkBorder/30 pt-4 animate-fade-in">
             {/* Active detections list */}
             <div className="flex-1 space-y-1.5 w-full text-left">
               <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Detections</h4>
@@ -697,18 +753,24 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-slate-900 dark:text-white">Analyze Image</h2>
               
-              {statusData?.custom_model_available && (
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    className="sr-only peer" 
-                    checked={useCustomModel} 
-                    onChange={(e) => setUseCustomModel(e.target.checked)} 
-                  />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-750 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-brand-600"></div>
-                  <span className="ml-2 text-xs font-bold text-slate-600 dark:text-slate-350">Custom Model</span>
-                </label>
-              )}
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer" 
+                  checked={useCustomModel} 
+                  onChange={(e) => {
+                    if (e.target.checked && !statusData?.custom_model_available) {
+                      alert("Please train your custom model in the 'Model Training' tab first before enabling this!");
+                    } else {
+                      setUseCustomModel(e.target.checked);
+                    }
+                  }} 
+                />
+                <div className="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-750 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-brand-600 cursor-pointer"></div>
+                <span className="ml-2 text-xs font-bold text-slate-605 dark:text-slate-300">
+                  Custom Model {!statusData?.custom_model_available && '(Train Required)'}
+                </span>
+              </label>
             </div>
             <DragDropUpload onUpload={handleUploadSubmit} isLoading={detectMutation.isPending} />
           </div>
@@ -744,7 +806,11 @@ export default function Dashboard() {
       )}
 
       {activeTab === 'live' && (
-        <LiveCameraStream useCustomModel={useCustomModel} />
+        <LiveCameraStream 
+          useCustomModel={useCustomModel} 
+          setUseCustomModel={setUseCustomModel}
+          customModelAvailable={statusData?.custom_model_available}
+        />
       )}
 
       {activeTab === 'analytics' && (

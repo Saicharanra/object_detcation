@@ -41,7 +41,7 @@ class YoloWorldModel:
 
     def load_custom_model(self, user_id: str) -> YOLO:
         if user_id not in self.custom_models:
-            weights_path = Path(__file__).resolve().parent.parent / "weights" / user_id / "best.pt"
+            weights_path = Path(__file__).resolve().parent / "weights" / user_id / "best.pt"
             if weights_path.exists():
                 logger.info(f"Loading custom YOLOv8 model for user {user_id}...")
                 start_time = time.time()
@@ -75,11 +75,11 @@ class YoloWorldModel:
         """
         # Determine model
         if use_custom_model and user_id:
-            weights_path = Path(__file__).resolve().parent.parent / "weights" / user_id / "best.pt"
+            weights_path = Path(__file__).resolve().parent / "weights" / user_id / "best.pt"
             if weights_path.exists():
                 model_to_use = self.load_custom_model(user_id)
                 # Load custom classes if present in metadata.json
-                metadata_path = Path(__file__).resolve().parent.parent / "weights" / user_id / "metadata.json"
+                metadata_path = Path(__file__).resolve().parent / "weights" / user_id / "metadata.json"
                 if metadata_path.exists():
                     import json
                     try:

@@ -135,7 +135,7 @@ export default function BoundingBoxViewer({ imageUrl, annotatedImageUrl, objects
               <img
                 src={annotatedImageUrl}
                 alt="Annotated detection results"
-                className="max-h-[500px] w-full object-contain"
+                className="max-h-[500px] max-w-full h-auto w-auto object-contain block mx-auto"
               />
             ) : (
               <div className="relative inline-block max-w-full">
@@ -144,7 +144,7 @@ export default function BoundingBoxViewer({ imageUrl, annotatedImageUrl, objects
                   src={imageUrl}
                   alt="Original upload"
                   onLoad={updateDimensions}
-                  className="max-h-[500px] w-full object-contain block mx-auto"
+                  className="max-h-[500px] max-w-full h-auto w-auto block mx-auto"
                 />
 
                 {/* Render Bounding Boxes */}
