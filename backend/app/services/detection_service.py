@@ -18,16 +18,17 @@ def process_detection(
     file: UploadFile,
     prompt: str = None,
     confidence_threshold: float = None,
-    use_custom_model: bool = False
+    use_custom_model: bool = False,
+    persist: bool = True
 ) -> dict:
     """
     Processes object detection for an uploaded image.
     Steps:
       1. Save uploaded file to local temp directory.
-      2. Upload original file to Supabase Storage.
+      2. Upload original file to Supabase Storage (skipped when persist=False).
       3. Run YOLO-World detection (using prompt list if provided).
-      4. Upload annotated file to Supabase Storage.
-      5. Save records into 'uploaded_images' and 'detections' tables.
+      4. Upload annotated file to Supabase Storage (skipped when persist=False).
+      5. Save records into 'uploaded_images' and 'detections' tables (skipped when persist=False).
       6. Remove local temporary files.
       7. Return results.
     """
@@ -49,65 +50,72 @@ def process_detection(
         
         with open(temp_orig_path, "wb") as f:
             f.write(file.file.read())
-            
+
         # Determine MIME type
         content_type = file.content_type or "image/jpeg"
-        
-        # 2. Upload original file to Supabase Storage
-        # Format: {user_id}/{image_uuid}_original{ext}
-        storage_orig_path = f"{user_id}/{image_uuid}_original{file_ext}"
-        original_url = upload_file(str(temp_orig_path), storage_orig_path, content_type)
-        
+
+        # 2. Upload original file to Supabase Storage (skipped for ephemeral/scan calls)
+        original_url = None
+        if persist:
+            # Format: {user_id}/{image_uuid}_original{ext}
+            storage_orig_path = f"{user_id}/{image_uuid}_original{file_ext}"
+            original_url = upload_file(str(temp_orig_path), storage_orig_path, content_type)
+
         # 3. Parse custom prompts (comma-separated list, e.g. "laptop, red bottle, keyboard")
         custom_classes = None
         if prompt:
             custom_classes = [c.strip() for c in prompt.split(",") if c.strip()]
-            
-        # Run YOLO-World Inference
+
+        # Run YOLO-World Inference (skip annotated-image rendering for non-persisted calls)
         detections_list, processing_time, local_annotated_path = yolo_model.predict(
             image_path=str(temp_orig_path),
             custom_classes=custom_classes,
             confidence=confidence_threshold,
             user_id=user_id,
-            use_custom_model=use_custom_model
+            use_custom_model=use_custom_model,
+            render_annotated=persist
         )
-        temp_annot_path = Path(local_annotated_path)
-        
-        # 4. Upload annotated file to Supabase Storage
-        storage_annot_path = f"{user_id}/{image_uuid}_annotated{file_ext}"
-        annotated_url = upload_file(str(temp_annot_path), storage_annot_path, content_type)
-        
-        # 5. Insert records in Database
-        # 5a. Create UploadedImage record
-        db_image = UploadedImage(
-            id=image_uuid,
-            user_id=user_id,
-            image_url=original_url,
-            annotated_image_url=annotated_url,
-            original_filename=original_filename
-        )
-        db.add(db_image)
-        db.flush() # Flush to get primary key link active if needed (already set explicitly)
-        
-        # 5b. Create Detection records
-        for det in detections_list:
-            bbox = det["bounding_box"]
-            db_det = Detection(
-                id=str(uuid.uuid4()),
-                image_id=image_uuid,
-                object_name=det["name"],
-                confidence=det["confidence"],
-                x_min=bbox["xmin"],
-                y_min=bbox["ymin"],
-                x_max=bbox["xmax"],
-                y_max=bbox["ymax"],
-                prompt_used=prompt,
-                processing_time=processing_time
+
+        annotated_url = None
+        if persist:
+            assert local_annotated_path is not None
+            temp_annot_path = Path(local_annotated_path)
+
+            # 4. Upload annotated file to Supabase Storage
+            storage_annot_path = f"{user_id}/{image_uuid}_annotated{file_ext}"
+            annotated_url = upload_file(str(temp_annot_path), storage_annot_path, content_type)
+
+            # 5. Insert records in Database
+            # 5a. Create UploadedImage record
+            db_image = UploadedImage(
+                id=image_uuid,
+                user_id=user_id,
+                image_url=original_url,
+                annotated_image_url=annotated_url,
+                original_filename=original_filename
             )
-            db.add(db_det)
-            
-        db.commit()
-        
+            db.add(db_image)
+            db.flush() # Flush to get primary key link active if needed (already set explicitly)
+
+            # 5b. Create Detection records
+            for det in detections_list:
+                bbox = det["bounding_box"]
+                db_det = Detection(
+                    id=str(uuid.uuid4()),
+                    image_id=image_uuid,
+                    object_name=det["name"],
+                    confidence=det["confidence"],
+                    x_min=bbox["xmin"],
+                    y_min=bbox["ymin"],
+                    x_max=bbox["xmax"],
+                    y_max=bbox["ymax"],
+                    prompt_used=prompt,
+                    processing_time=processing_time
+                )
+                db.add(db_det)
+
+            db.commit()
+
         # Format and return JSON response
         formatted_objects = [
             {

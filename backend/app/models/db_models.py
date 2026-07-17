@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, ARRAY
+from sqlalchemy import Column, String, Integer, Float, DateTime, ForeignKey, Text, ARRAY, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database.session import Base
@@ -8,7 +8,7 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = {"schema": "public"}
 
-    id = Column(String, primary_key=True, index=True) # maps to Supabase auth.users.id
+    id = Column(UUID(as_uuid=False), primary_key=True, index=True) # maps to Supabase auth.users.id
     email = Column(String, index=True)
     full_name = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -23,8 +23,8 @@ class UploadedImage(Base):
     __tablename__ = "uploaded_images"
     __table_args__ = {"schema": "public"}
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(UUID(as_uuid=False), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
     image_url = Column(String, nullable=False)
     annotated_image_url = Column(String, nullable=True)
     original_filename = Column(String, nullable=False)
@@ -39,8 +39,8 @@ class Detection(Base):
     __tablename__ = "detections"
     __table_args__ = {"schema": "public"}
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    image_id = Column(String, ForeignKey("public.uploaded_images.id", ondelete="CASCADE"), nullable=False)
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    image_id = Column(UUID(as_uuid=False), ForeignKey("public.uploaded_images.id", ondelete="CASCADE"), nullable=False)
     object_name = Column(String, nullable=False, index=True)
     confidence = Column(Float, nullable=False)
     x_min = Column(Float, nullable=False)
@@ -59,8 +59,8 @@ class Analytics(Base):
     __tablename__ = "analytics"
     __table_args__ = {"schema": "public"}
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("public.users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(UUID(as_uuid=False), ForeignKey("public.users.id", ondelete="CASCADE"), unique=True, nullable=False)
     total_images = Column(Integer, default=0, nullable=False)
     total_detections = Column(Integer, default=0, nullable=False)
     most_detected_object = Column(String, nullable=True)
@@ -74,8 +74,8 @@ class TrainingJob(Base):
     __tablename__ = "training_jobs"
     __table_args__ = {"schema": "public"}
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(UUID(as_uuid=False), ForeignKey("public.users.id", ondelete="CASCADE"), nullable=False)
     status = Column(String, default="pending", nullable=False)
     epochs = Column(Integer, default=5, nullable=False)
     trained_classes = Column(ARRAY(String), nullable=True)

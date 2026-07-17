@@ -24,6 +24,9 @@ class Settings:
     # Machine Learning Settings
     YOLO_MODEL_NAME: str = os.getenv("YOLO_MODEL_NAME", "yolov8s-worldv2.pt")
     CONFIDENCE_THRESHOLD: float = float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
+
+    # Additional CORS origins (comma-separated), merged with the built-in defaults in main.py
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
     
     # Upload Directories
     UPLOAD_DIR: Path = BASE_DIR / "uploads"

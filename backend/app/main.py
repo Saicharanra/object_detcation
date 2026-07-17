@@ -6,6 +6,7 @@ import logging
 
 from app.config import settings
 from app.database.session import engine, Base
+import app.models.db_models  # Ensure all SQLAlchemy models are registered with Base.metadata before create_all
 from app.api import auth, detection, analytics, training
 from app.ml.yolo_model import yolo_model
 
@@ -44,13 +45,16 @@ app = FastAPI(
 )
 
 # CORS configuration
-# Allows requests from Vite React default port 5173, plus common alternatives
-origins = [
+# Allows requests from Vite React default port 5173, plus common alternatives,
+# plus any additional origins configured via the CORS_ORIGINS env var (comma-separated).
+default_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
 ]
+extra_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+origins = list(dict.fromkeys(default_origins + extra_origins))
 
 app.add_middleware(
     CORSMiddleware,

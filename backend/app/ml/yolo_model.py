@@ -1,5 +1,6 @@
 import time
 import logging
+import threading
 from pathlib import Path
 from PIL import Image
 import cv2
@@ -15,10 +16,14 @@ class YoloWorldModel:
         self.world_model = None    # YOLO-World open-vocabulary model for Detection Studio (e.g. yolov8s-worldv2.pt)
         self.custom_models = {}    # dict mapping user_id -> YOLO instance
         self.default_classes = [
-            "laptop", "mobile phone", "keyboard", "mouse", "water bottle", 
-            "car", "dog", "bicycle", "person", "helmet", "chair", 
+            "laptop", "mobile phone", "keyboard", "mouse", "water bottle",
+            "car", "dog", "bicycle", "person", "helmet", "chair",
             "backpack", "coffee mug", "glasses", "cup", "book"
         ]
+        # Guards set_classes()+predict() on the shared world_model instance, which is
+        # not safe for concurrent calls from multiple threadpool workers (a race would
+        # let one request's inference pick up another request's class filter).
+        self._world_model_lock = threading.Lock()
 
     def load_model(self):
         """Loads the standard fast model (yolo11n.pt) for real-time WebSocket streaming."""
@@ -59,19 +64,20 @@ class YoloWorldModel:
             logger.info(f"Unloaded custom model cache for user {user_id}.")
 
     def predict(
-        self, 
-        image_path: str, 
-        custom_classes: list[str] = None, 
+        self,
+        image_path: str,
+        custom_classes: list[str] = None,
         confidence: float = None,
         user_id: str = None,
-        use_custom_model: bool = False
-    ) -> tuple[list[dict], float, str]:
+        use_custom_model: bool = False,
+        render_annotated: bool = True
+    ) -> tuple[list[dict], float, str | None]:
         """
         Runs object detection on the image using YOLOv8 or YOLO-World.
         Returns:
             detections: List of dicts with object name, confidence, and bounding box coordinates.
             processing_time: Time taken in seconds.
-            annotated_image_path: Path to the locally saved annotated image.
+            annotated_image_path: Path to the locally saved annotated image, or None if render_annotated=False.
         """
         # Determine model
         if use_custom_model and user_id:
@@ -101,42 +107,52 @@ class YoloWorldModel:
             classes_filter = custom_classes
 
         conf = confidence if confidence is not None else settings.CONFIDENCE_THRESHOLD
-        
-        is_world_model = isinstance(model_to_use, YOLOWorld)
-        if is_world_model:
-            # Set the custom classes dynamically on YOLO-World
-            if classes_filter:
-                model_to_use.set_classes(classes_filter)
-            else:
-                model_to_use.set_classes(self.default_classes)
 
-        # Run inference
-        start_time = time.time()
-        results = model_to_use.predict(image_path, conf=conf, verbose=False)
-        processing_time = time.time() - start_time
-        
+        is_world_model = isinstance(model_to_use, YOLOWorld)
+
+        # set_classes()+predict() on the shared world_model must be serialized: concurrent
+        # calls could interleave and let one request pick up another's class filter.
+        lock = self._world_model_lock if is_world_model else None
+        if lock:
+            lock.acquire()
+        try:
+            if is_world_model:
+                # Set the custom classes dynamically on YOLO-World
+                if classes_filter:
+                    model_to_use.set_classes(classes_filter)
+                else:
+                    model_to_use.set_classes(self.default_classes)
+
+            # Run inference
+            start_time = time.time()
+            results = model_to_use.predict(image_path, conf=conf, verbose=False)
+            processing_time = time.time() - start_time
+        finally:
+            if lock:
+                lock.release()
+
         # Process results
         detections = []
         result = results[0]
         boxes = result.boxes
-        
+
         # Determine filtering list (post-filter only for standard closed-vocabulary models)
         filter_list = None
         if classes_filter and not is_world_model:
             filter_list = [c.lower().strip() for c in classes_filter if c.strip()]
-        
+
         for box in boxes:
             xyxy = box.xyxy[0].tolist()
             score = float(box.conf[0])
             cls_id = int(box.cls[0])
-            
+
             # Map class ID to class name
             class_name = model_to_use.names[cls_id] if cls_id < len(model_to_use.names) else "unknown"
-            
+
             # Class filter check (since standard YOLOv8 is closed vocabulary, we post-filter)
             if filter_list and class_name.lower().strip() not in filter_list:
                 continue
-                
+
             detections.append({
                 "name": class_name.capitalize(),
                 "confidence": round(score, 4),
@@ -147,15 +163,18 @@ class YoloWorldModel:
                     "ymax": float(xyxy[3])
                 }
             })
-            
+
+        if not render_annotated:
+            return detections, processing_time, None
+
         # Draw bounding boxes and save annotated image
         annotated_img = result.plot()
-        
+
         # Save locally in temp directory
         p = Path(image_path)
         annotated_image_path = str(p.parent / f"annotated_{p.name}")
         cv2.imwrite(annotated_image_path, annotated_img)
-        
+
         return detections, processing_time, annotated_image_path
 
     def predict_frame(

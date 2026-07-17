@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: spotme-object-detection
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: INTERNAL_SHARED_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://stopme.in

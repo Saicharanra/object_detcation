@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, Query, status, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 import logging
+import os
 
 from app.database.session import get_db
 from app.api.auth import get_current_user
@@ -30,29 +32,49 @@ def validate_image(file: UploadFile):
             detail="File is not an image"
          )
 
+INTERNAL_SHARED_SECRET = os.getenv("INTERNAL_SHARED_SECRET", "")
+
+
+def verify_internal_token(x_internal_token: str = Header(None)):
+    """
+    Optional shared-secret guard for server-to-server callers (e.g. a separate web app's
+    backend). No-op when INTERNAL_SHARED_SECRET is unset (local dev default).
+    """
+    if INTERNAL_SHARED_SECRET and x_internal_token != INTERNAL_SHARED_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing internal token"
+        )
+
+
 @router.post("/detect")
 async def detect_objects(
     file: UploadFile = File(...),
     prompt: str = Form(None, description="Comma-separated list of items to detect (e.g. 'laptop, dog, red cup')"),
     confidence: float = Form(None, description="Confidence threshold override"),
     use_custom_model: bool = Form(False, description="Whether to use the custom fine-tuned model weights"),
+    persist: bool = Form(True, description="Whether to save the image/detections to storage and the database"),
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_internal_token)
 ):
     """
     Upload an image and detect objects using open-vocabulary YOLO-World.
-    Saves the image and detections to Supabase and PostgreSQL.
+    Saves the image and detections to Supabase and PostgreSQL, unless persist=False.
     """
     validate_image(file)
     try:
-        # Process detection
-        res = process_detection(
+        # Process detection (offloaded to a threadpool since inference is a blocking,
+        # CPU-bound call and this route is async)
+        res = await run_in_threadpool(
+            process_detection,
             db=db,
             user_id=current_user["id"],
             file=file,
             prompt=prompt,
             confidence_threshold=confidence,
-            use_custom_model=use_custom_model
+            use_custom_model=use_custom_model,
+            persist=persist
         )
         return res
     except Exception as e:
@@ -68,8 +90,10 @@ async def upload_and_detect(
     prompt: str = Form(None),
     confidence: float = Form(None),
     use_custom_model: bool = Form(False),
+    persist: bool = Form(True),
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_internal_token)
 ):
     """
     Alias for /detect to align with the upload endpoint requirement.
@@ -79,8 +103,10 @@ async def upload_and_detect(
         prompt=prompt,
         confidence=confidence,
         use_custom_model=use_custom_model,
+        persist=persist,
         current_user=current_user,
-        db=db
+        db=db,
+        _=None
     )
 
 @router.get("/history")
