@@ -14,12 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-# Install CPU-only torch first so ultralytics' transitive torch requirement
-# is already satisfied by the lightweight CPU wheel (avoids pulling the much
-# larger CUDA build, which is wasted weight on a CPU-only host).
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
+# Install CPU-only torch + torchvision first (matched versions/build from the
+# same wheel index) so nothing later pulls in a mismatched torchvision from
+# PyPI's default index — a torch/torchvision build mismatch is what causes
+# "operator torchvision::nms does not exist" at import time.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir git+https://github.com/ultralytics/CLIP.git
+    && pip install --no-cache-dir ftfy regex tqdm \
+    && pip install --no-cache-dir --no-deps git+https://github.com/ultralytics/CLIP.git
 
 COPY app ./app
 COPY yolo11n.pt yolov8s-worldv2.pt ./
