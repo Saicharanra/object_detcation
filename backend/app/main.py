@@ -8,7 +8,6 @@ from app.config import settings
 from app.database.session import engine, Base
 import app.models.db_models  # Ensure all SQLAlchemy models are registered with Base.metadata before create_all
 from app.api import auth, detection, analytics, training
-from app.ml.yolo_model import yolo_model
 
 # Configure logging
 logging.basicConfig(
@@ -28,12 +27,12 @@ except Exception as e:
 # Modern Lifespan context manager for startup and shutdown actions
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Intentionally not eager-loading any model here: on a 1GB memory-capped host,
+    # every model held in memory before it's actually needed is wasted headroom.
+    # yolo11n.pt (predict_frame, live-stream) and yolov8s-worldv2.pt (predict, /detect)
+    # both already lazy-load themselves on first use via YoloWorldModel.load_model()
+    # / load_world_model().
     logger.info("Application starting up...")
-    try:
-        # Load YOLO-World model at startup
-        yolo_model.load_model()
-    except Exception as e:
-        logger.error(f"Could not load YOLO-World model on startup: {str(e)}", exc_info=True)
     yield
     logger.info("Application shutting down...")
 
